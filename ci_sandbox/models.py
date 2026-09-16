@@ -27,6 +27,7 @@ class Job:
     services: dict[str, Any] = field(default_factory=dict)
     strategy: dict[str, Any] = field(default_factory=dict)
     outputs: dict[str, str] = field(default_factory=dict)
+    matrix_vars: dict[str, Any] = field(default_factory=dict)
     # resolved at sim time
     status: str = "pending"  # pending | running | skipped | success | failure
     skipped_because: str = ""

@@ -7,6 +7,7 @@ Simulador local de pipelines CI. Veja quais jobs rodam e quais são skipados —
 - Faz parse de workflows do GitHub Actions (`.github/workflows/*.yml`)
 - Resolve o DAG de jobs (dependências `needs`)
 - Avalia condições `if` para determinar skip/run
+- Expande estratégias de `matrix` mostrando combinações individuais com suas variáveis
 - Mostra resultado colorido no terminal
 
 ## Instalação
@@ -92,11 +93,37 @@ $ ci-sandbox simulate .github/workflows/ci.yml --event pull_request --branch fea
   ══ 1 success · 2 skipped (3 jobs) ══
 ```
 
+### Exemplo com Matrix Strategy
+
+Workflows com `strategy.matrix` têm seus jobs expandidos em entradas individuais exibindo suas variáveis e `runs-on` resolvidos:
+
+```yaml
+jobs:
+  test:
+    strategy:
+      matrix:
+        node: [18, 20]
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+```
+
+```bash
+$ ci-sandbox simulate .github/workflows/ci.yml
+🔧 CI
+   Event: push | Branch: main | Ref: refs/heads/main
+
+  ✓ test (node=18, os=macos-latest) [macos-latest]
+  ✓ test (node=18, os=ubuntu-latest) [ubuntu-latest]
+  ✓ test (node=20, os=macos-latest) [macos-latest]
+  ✓ test (node=20, os=ubuntu-latest) [ubuntu-latest]
+
+  ══ 4 success · 0 skipped (4 jobs) ══
+```
+
 ## Limitações
 
 - Não executa steps (só simula a lógica de skip/run)
 - Não suporta todos os functions do GitHub Actions (implementação parcial)
-- Não faz parse de `matrix` completo (suporte básico)
 
 ## Licença
 

@@ -27,10 +27,115 @@ class CISimulator:
         self.secrets = secrets or {}
         self.inputs = inputs or {}
         self.execution_order: list[list[str]] = []
+        self.jobs: dict[str, Job] = self._expand_jobs(self.workflow.jobs)
+
+    def _expand_jobs(self, raw_jobs: dict[str, Job]) -> dict[str, Job]:
+        expanded: dict[str, Job] = {}
+        mapping: dict[str, list[str]] = {}
+
+        for job_name, job in raw_jobs.items():
+            matrix = job.strategy.get("matrix") if job.strategy else None
+            if not matrix or not isinstance(matrix, dict):
+                mapping[job_name] = [job_name]
+                expanded[job_name] = job
+                continue
+
+            combinations = self._build_matrix_combinations(matrix)
+            if not combinations:
+                mapping[job_name] = [job_name]
+                expanded[job_name] = job
+                continue
+
+            sub_names: list[str] = []
+            for combo in combinations:
+                vars_str = ", ".join(f"{k}={combo[k]}" for k in sorted(combo.keys()))
+                sub_name = f"{job_name} ({vars_str})"
+                sub_names.append(sub_name)
+
+                runs_on = job.runs_on
+                for k, v in combo.items():
+                    runs_on = runs_on.replace(f"${{{{ matrix.{k} }}}}", str(v))
+                    runs_on = runs_on.replace(f"${{{{matrix.{k}}}}}", str(v))
+                    runs_on = runs_on.replace(f"matrix.{k}", str(v))
+
+                if_cond = job.if_condition
+                for k, v in combo.items():
+                    if_cond = if_cond.replace(f"${{{{ matrix.{k} }}}}", str(v))
+                    if_cond = if_cond.replace(f"${{{{matrix.{k}}}}}", str(v))
+                    if_cond = if_cond.replace(f"matrix.{k}", str(v))
+
+                sub_job = Job(
+                    name=sub_name,
+                    runs_on=runs_on,
+                    needs=list(job.needs),
+                    if_condition=if_cond,
+                    steps=job.steps,
+                    env=dict(job.env),
+                    services=dict(job.services),
+                    strategy=dict(job.strategy),
+                    outputs=dict(job.outputs),
+                    matrix_vars=combo,
+                    status=job.status,
+                    skipped_because=job.skipped_because,
+                )
+                expanded[sub_name] = sub_job
+            mapping[job_name] = sub_names
+
+        for job in expanded.values():
+            new_needs: list[str] = []
+            for n in job.needs:
+                if n in mapping:
+                    new_needs.extend(mapping[n])
+                else:
+                    new_needs.append(n)
+            job.needs = new_needs
+
+        return expanded
+
+    def _build_matrix_combinations(self, matrix: dict[str, Any]) -> list[dict[str, Any]]:
+        import itertools
+
+        keys = [k for k in matrix.keys() if k not in ("include", "exclude")]
+        if not keys and "include" not in matrix:
+            return []
+
+        if keys:
+            dimensions = [
+                matrix[k] if isinstance(matrix[k], list) else [matrix[k]]
+                for k in keys
+            ]
+            combos = [dict(zip(keys, prod)) for prod in itertools.product(*dimensions)]
+        else:
+            combos = []
+
+        for inc in matrix.get("include", []):
+            if isinstance(inc, dict):
+                matched = False
+                for c in combos:
+                    if all(c.get(k) == inc[k] for k in keys if k in inc):
+                        c.update(inc)
+                        matched = True
+                if not matched:
+                    combos.append(dict(inc))
+
+        excludes = matrix.get("exclude", [])
+        if excludes:
+            filtered = []
+            for c in combos:
+                excluded = False
+                for exc in excludes:
+                    if isinstance(exc, dict) and all(c.get(k) == exc[k] for k in exc):
+                        excluded = True
+                        break
+                if not excluded:
+                    filtered.append(c)
+            combos = filtered
+
+        return combos
 
     def run(self) -> dict[str, Job]:
         """Executa simulação e retorna jobs com status."""
-        jobs = self.workflow.jobs
+        jobs = self.jobs
         if not self._event_triggers():
             for job in jobs.values():
                 job.status = "skipped"
@@ -55,7 +160,7 @@ class CISimulator:
         return self.event in on
 
     def _topological_sort(self) -> list[list[str]]:
-        jobs = self.workflow.jobs
+        jobs = self.jobs
         in_degree: dict[str, int] = {n: 0 for n in jobs}
         dependents: dict[str, list[str]] = {n: [] for n in jobs}
 
@@ -82,7 +187,7 @@ class CISimulator:
 
     def _evaluate_job(self, job: Job) -> str:
         for need in job.needs:
-            need_job = self.workflow.jobs.get(need)
+            need_job = self.jobs.get(need)
             if need_job and need_job.status in ("failure", "skipped"):
                 job.skipped_because = f"dependency '{need}' did not succeed"
                 return "skipped"

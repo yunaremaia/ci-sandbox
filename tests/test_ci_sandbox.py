@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from ci_sandbox.models import Job, Step, Workflow
+from ci_sandbox.models import Job, Workflow
 from ci_sandbox.parser import WorkflowParser
 from ci_sandbox.simulator import CISimulator
 
@@ -199,3 +199,108 @@ class TestExpressionEvaluation:
         sim = CISimulator(wf)
         assert sim._eval_expression("${{ true }}") is True
         assert sim._eval_expression("${{ contains('abc', 'a') }}") is True
+
+
+class TestMatrixStrategy:
+    def test_matrix_expansion_basic(self):
+        wf = Workflow(
+            name="matrix-ci",
+            on={"push": {}},
+            jobs={
+                "test": Job(
+                    name="test",
+                    runs_on="${{ matrix.os }}",
+                    strategy={
+                        "matrix": {
+                            "node": [18, 20],
+                            "os": ["ubuntu", "windows"],
+                        }
+                    },
+                )
+            },
+        )
+        sim = CISimulator(wf)
+        jobs = sim.run()
+        assert len(jobs) == 4
+        assert "test (node=18, os=ubuntu)" in jobs
+        assert "test (node=18, os=windows)" in jobs
+        assert "test (node=20, os=ubuntu)" in jobs
+        assert "test (node=20, os=windows)" in jobs
+
+        job_ubuntu = jobs["test (node=18, os=ubuntu)"]
+        assert job_ubuntu.runs_on == "ubuntu"
+        assert job_ubuntu.matrix_vars == {"node": 18, "os": "ubuntu"}
+        assert job_ubuntu.status == "success"
+
+    def test_matrix_with_include_and_exclude(self):
+        wf = Workflow(
+            name="matrix-inc-exc",
+            on={"push": {}},
+            jobs={
+                "build": Job(
+                    name="build",
+                    strategy={
+                        "matrix": {
+                            "os": ["ubuntu", "windows"],
+                            "node": [18, 20],
+                            "exclude": [{"os": "windows", "node": 18}],
+                            "include": [{"os": "macos", "node": 22}],
+                        }
+                    },
+                )
+            },
+        )
+        sim = CISimulator(wf)
+        jobs = sim.run()
+        # total: 4 - 1 (excluded) + 1 (included) = 4
+        assert len(jobs) == 4
+        assert "build (node=18, os=windows)" not in jobs
+        assert "build (node=18, os=ubuntu)" in jobs
+        assert "build (node=20, os=ubuntu)" in jobs
+        assert "build (node=20, os=windows)" in jobs
+        assert "build (node=22, os=macos)" in jobs
+
+    def test_matrix_downstream_dependency(self):
+        wf = Workflow(
+            name="matrix-dep",
+            on={"push": {}},
+            jobs={
+                "test": Job(
+                    name="test",
+                    strategy={"matrix": {"node": [18, 20]}},
+                ),
+                "deploy": Job(
+                    name="deploy",
+                    needs=["test"],
+                ),
+            },
+        )
+        sim = CISimulator(wf)
+        jobs = sim.run()
+        assert len(jobs) == 3
+        deploy_job = jobs["deploy"]
+        assert "test (node=18)" in deploy_job.needs
+        assert "test (node=20)" in deploy_job.needs
+        assert deploy_job.status == "success"
+
+    def test_matrix_cli_formatting(self):
+        from ci_sandbox.cli import format_results
+
+        wf = Workflow(
+            name="matrix-format",
+            on={"push": {}},
+            jobs={
+                "test": Job(
+                    name="test",
+                    runs_on="${{ matrix.os }}",
+                    strategy={"matrix": {"node": [18], "os": ["ubuntu"]}},
+                )
+            },
+        )
+        sim = CISimulator(wf)
+        jobs = sim.run()
+        output = format_results(wf, jobs, sim)
+        assert "test (node=18, os=ubuntu)" in output
+        assert "[ubuntu]" in output
+        assert "1 success" in output
+
