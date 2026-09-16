@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import click
@@ -11,7 +12,14 @@ from ci_sandbox.models import Job, Workflow
 from ci_sandbox.parser import WorkflowParser
 from ci_sandbox.simulator import CISimulator
 
-__version__ = "0.1.0"
+try:
+    __version__ = version("ci-sandbox")
+except PackageNotFoundError:
+    try:
+        from ci_sandbox import __version__ as _pkg_version
+        __version__ = _pkg_version
+    except ImportError:
+        __version__ = "0.1.0"
 
 
 def format_results(
@@ -85,7 +93,7 @@ def format_results(
 
 
 @click.group()
-@click.version_option(version=__version__)
+@click.version_option(__version__, "-v", "--version", package_name="ci-sandbox")
 def cli():
     """CI Sandbox — Simule pipelines CI localmente sem executar."""
 

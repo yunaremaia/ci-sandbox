@@ -6,8 +6,10 @@ from pathlib import Path
 
 import pytest
 import yaml
+from click.testing import CliRunner
 
-from ci_sandbox.models import Job, Step, Workflow
+from ci_sandbox.cli import __version__, cli
+from ci_sandbox.models import Workflow
 from ci_sandbox.parser import WorkflowParser
 from ci_sandbox.simulator import CISimulator
 
@@ -199,3 +201,17 @@ class TestExpressionEvaluation:
         sim = CISimulator(wf)
         assert sim._eval_expression("${{ true }}") is True
         assert sim._eval_expression("${{ contains('abc', 'a') }}") is True
+
+
+class TestCliVersion:
+    def test_version_long_flag(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--version"])
+        assert result.exit_code == 0
+        assert __version__ in result.output
+
+    def test_version_short_flag(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-v"])
+        assert result.exit_code == 0
+        assert __version__ in result.output
