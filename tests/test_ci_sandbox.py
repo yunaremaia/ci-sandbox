@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from ci_sandbox.models import Job, Step, Workflow
+from ci_sandbox.models import Workflow
 from ci_sandbox.parser import WorkflowParser
 from ci_sandbox.simulator import CISimulator
 
