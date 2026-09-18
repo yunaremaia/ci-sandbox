@@ -101,3 +101,7 @@ $ ci-sandbox simulate .github/workflows/ci.yml --event pull_request --branch fea
 ## Licença
 
 MIT
+
+## Local dry-run
+
+Run the project's test or dry-run command before opening a PR to catch workflow YAML issues early.
