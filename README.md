@@ -105,3 +105,7 @@ MIT
 ## Local dry-run
 
 Run the project's test or dry-run command before opening a PR to catch workflow YAML issues early.
+
+# CI Sandbox
+
+![CI](https://github.com/yunaremaia/ci-sandbox/actions/workflows/ci.yml/badge.svg)
