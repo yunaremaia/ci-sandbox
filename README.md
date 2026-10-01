@@ -1,5 +1,7 @@
 # CI Sandbox
 
+![ci](https://github.com/yunaremaia/ci-sandbox/actions/workflows/ci.yml/badge.svg) ![py](https://img.shields.io/badge/python-3.11-blue.svg) ![license](https://img.shields.io/github/license/yunaremaia/ci-sandbox) ![stars](https://img.shields.io/github/stars/yunaremaia/ci-sandbox)
+
 Simulador local de pipelines CI. Veja quais jobs rodam e quais são skipados — sem executar nada.
 
 ## O que faz
@@ -98,6 +100,18 @@ $ ci-sandbox simulate .github/workflows/ci.yml --event pull_request --branch fea
 - Não suporta todos os functions do GitHub Actions (implementação parcial)
 - Não faz parse de `matrix` completo (suporte básico)
 
+If this tool is useful to you, a star helps other people find it.
+
+## Related tools
+
+- **[ci-test-gate](https://github.com/yunaremaia/ci-test-gate)** — block PRs until the required tests actually run
+- **[sandbox-ffi-layers](https://github.com/yunaremaia/sandbox-ffi-layers)** — layer FFI calls behind a sandbox boundary
+- **[agent-workspace](https://github.com/yunaremaia/agent-workspace)** — isolated workspaces per AI agent session
+- **[vibeguard](https://github.com/yunaremaia/vibeguard)** — guardrails for AI-generated code changes
+
+Part of a family of focused, single-purpose developer tools — each one does one thing
+and does it well.
+
 ## Licença
 
 MIT
@@ -109,3 +123,4 @@ Run the project's test or dry-run command before opening a PR to catch workflow 
 # CI Sandbox
 
 ![CI](https://github.com/yunaremaia/ci-sandbox/actions/workflows/ci.yml/badge.svg)
+
