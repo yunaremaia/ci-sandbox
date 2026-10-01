@@ -14,7 +14,7 @@ Simulador local de pipelines CI. Veja quais jobs rodam e quais são skipados —
 ## Instalação
 
 ```bash
-pip install ci-sandbox
+pip install git+https://github.com/yunaremaia/ci-sandbox.git
 ```
 
 ## Uso
