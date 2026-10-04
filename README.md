@@ -107,7 +107,7 @@ If this tool is useful to you, a star helps other people find it.
 - **[ci-test-gate](https://github.com/yunaremaia/ci-test-gate)** — block PRs until the required tests actually run
 - **[sandbox-ffi-layers](https://github.com/yunaremaia/sandbox-ffi-layers)** — layer FFI calls behind a sandbox boundary
 - **[agent-workspace](https://github.com/yunaremaia/agent-workspace)** — isolated workspaces per AI agent session
-- **[vibeguard](https://github.com/yunaremaia/vibeguard)** — guardrails for AI-generated code changes
+- **[vibeguard](https://github.com/yunaremaia/vibeguard)** — scan AI-generated code for hardcoded secrets, SQL injection and dangerous eval/exec
 
 Part of a family of focused, single-purpose developer tools — each one does one thing
 and does it well.
