@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from ci_sandbox.models import Workflow
+from ci_sandbox.models import Job, Workflow
 from ci_sandbox.parser import WorkflowParser
 from ci_sandbox.simulator import CISimulator
 
@@ -199,3 +199,165 @@ class TestExpressionEvaluation:
         sim = CISimulator(wf)
         assert sim._eval_expression("${{ true }}") is True
         assert sim._eval_expression("${{ contains('abc', 'a') }}") is True
+
+    def test_failure_reflects_failed_job(self):
+        """#76: failure() is true when a job in the run has status failure."""
+        wf = Workflow(
+            name="test",
+            jobs={
+                "a": Job(name="a", status="success"),
+                "b": Job(name="b", status="failure"),
+            },
+        )
+        assert CISimulator(wf)._eval_expression("failure()") is True
+
+    def test_failure_false_without_failures(self):
+        wf = Workflow(name="test", jobs={"a": Job(name="a", status="success")})
+        assert CISimulator(wf)._eval_expression("failure()") is False
+
+    def test_success_false_when_a_job_skipped(self):
+        wf = Workflow(name="test", jobs={"a": Job(name="a", status="skipped")})
+        assert CISimulator(wf)._eval_expression("success()") is False
+
+    def test_success_true_when_every_evaluated_job_succeeded(self):
+        wf = Workflow(
+            name="test",
+            jobs={
+                "a": Job(name="a", status="success"),
+                "b": Job(name="b", status="pending"),
+            },
+        )
+        assert CISimulator(wf)._eval_expression("success()") is True
+
+    def test_cancelled_is_false(self):
+        """No cancellation source exists yet, so the answer is always False."""
+        assert CISimulator(Workflow(name="test"))._eval_expression("cancelled()") is False
+
+
+def _raw(tmp_path: Path, filename: str, text: str) -> Path:
+    """Writes a workflow verbatim, so YAML key quirks survive (bare `on:`)."""
+    path = tmp_path / filename
+    path.write_text(text)
+    return path
+
+
+class TestOnTriggers:
+    """#83: PyYAML applies the YAML 1.1 bool resolver, so `on` arrives as True."""
+
+    PUSH_ONLY = (
+        "name: Deploy\n"
+        "on:\n"
+        "  push:\n"
+        "    branches: [main]\n"
+        "jobs:\n"
+        "  build:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: echo build\n"
+    )
+
+    def test_on_mapping_is_parsed(self, tmp_path: Path):
+        wf = WorkflowParser(_raw(tmp_path, "map.yml", self.PUSH_ONLY)).parse()
+        assert "push" in wf.on
+
+    def test_on_string_is_parsed(self, tmp_path: Path):
+        wf = WorkflowParser(_raw(tmp_path, "str.yml", "on: push\njobs: {}\n")).parse()
+        assert wf.on == {"push": {}}
+
+    def test_on_list_is_parsed(self, tmp_path: Path):
+        wf = WorkflowParser(
+            _raw(tmp_path, "list.yml", "on: [push, release]\njobs: {}\n")
+        ).parse()
+        assert set(wf.on) == {"push", "release"}
+
+    def test_undeclared_event_skips_everything(self, tmp_path: Path):
+        sim = CISimulator(
+            WorkflowParser(_raw(tmp_path, "deploy.yml", self.PUSH_ONLY)).parse(),
+            event="release",
+            branch="main",
+        )
+        jobs = sim.run()
+        assert jobs["build"].status == "skipped"
+        assert "release" in jobs["build"].skipped_because
+        # o renderizador percorre execution_order: sem isto, nada aparece
+        assert sim.execution_order == [["build"]]
+
+    def test_declared_event_runs(self, tmp_path: Path):
+        sim = CISimulator(
+            WorkflowParser(_raw(tmp_path, "deploy.yml", self.PUSH_ONLY)).parse(),
+            event="push",
+            branch="main",
+        )
+        assert sim.run()["build"].status == "success"
+
+
+class TestCycleDetection:
+    """#77: a dependency cycle is an error, not a silently dropped job."""
+
+    @staticmethod
+    def _wf(needs: dict[str, str]) -> Workflow:
+        return Workflow(
+            name="C",
+            jobs={
+                name: Job(name=name, needs=[need] if need else [])
+                for name, need in needs.items()
+            },
+        )
+
+    def test_simple_cycle_raises_with_path(self):
+        sim = CISimulator(self._wf({"a": "b", "b": "a"}))
+        with pytest.raises(ValueError) as exc:
+            sim.run()
+        assert "a → b → a" in str(exc.value)
+
+    def test_complex_cycle_names_every_job(self):
+        sim = CISimulator(self._wf({"a": "b", "b": "c", "c": "a"}))
+        with pytest.raises(ValueError) as exc:
+            sim.run()
+        message = str(exc.value)
+        assert "Circular dependency detected" in message
+        assert all(name in message for name in ("a", "b", "c"))
+
+    def test_acyclic_workflow_still_runs(self):
+        sim = CISimulator(self._wf({"a": "", "b": "a"}))
+        jobs = sim.run()
+        assert sim.execution_order == [["a"], ["b"]]
+        assert jobs["b"].status == "success"
+
+
+class TestMalformedWorkflows:
+    """#75: malformed documents get a friendly ValueError, not an AttributeError."""
+
+    def test_jobs_as_string(self, tmp_path: Path):
+        path = _raw(tmp_path, "bad.yml", 'on: push\njobs: "invalid"\n')
+        with pytest.raises(ValueError, match="'jobs' must be a mapping"):
+            WorkflowParser(path).parse()
+
+    def test_steps_as_string(self, tmp_path: Path):
+        path = _raw(tmp_path, "bad.yml", "jobs:\n  build:\n    steps: nope\n")
+        with pytest.raises(ValueError, match="'steps' must be a list"):
+            WorkflowParser(path).parse()
+
+    def test_step_as_string(self, tmp_path: Path):
+        path = _raw(tmp_path, "bad.yml", "jobs:\n  build:\n    steps:\n      - echo hi\n")
+        with pytest.raises(ValueError, match="step .* must be a mapping"):
+            WorkflowParser(path).parse()
+
+    def test_on_as_integer(self, tmp_path: Path):
+        path = _raw(tmp_path, "bad.yml", "on: 42\njobs: {}\n")
+        with pytest.raises(ValueError, match="'on' must be a string, list or mapping"):
+            WorkflowParser(path).parse()
+
+    def test_root_not_a_mapping(self, tmp_path: Path):
+        path = _raw(tmp_path, "bad.yml", "- just\n- a list\n")
+        with pytest.raises(ValueError, match="root must be a mapping"):
+            WorkflowParser(path).parse()
+
+    def test_error_names_the_file(self, tmp_path: Path):
+        path = _raw(tmp_path, "broken.yml", 'jobs: "invalid"\n')
+        with pytest.raises(ValueError, match="broken.yml"):
+            WorkflowParser(path).parse()
+
+    def test_valid_workflow_still_parses(self, sample_workflow: Path):
+        wf = WorkflowParser(sample_workflow).parse()
+        assert len(wf.jobs) == 3

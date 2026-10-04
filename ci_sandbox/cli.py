@@ -136,7 +136,11 @@ def simulate(
         inputs=inputs_dict,
     )
 
-    jobs = simulator.run()
+    try:
+        jobs = simulator.run()
+    except ValueError as e:
+        click.echo(click.style(f"❌ Erro ao simular workflow: {e}", fg="red"))
+        sys.exit(1)
     output = format_results(workflow, jobs, simulator, show_steps=steps)
     click.echo(output)
 

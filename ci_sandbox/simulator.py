@@ -34,6 +34,7 @@ class CISimulator:
             for job in jobs.values():
                 job.status = "skipped"
                 job.skipped_because = f"event '{self.event}' does not trigger"
+            self.execution_order.append(sorted(jobs))
             return jobs
 
         sorted_groups = self._topological_sort()
@@ -66,18 +67,57 @@ class CISimulator:
 
         ready = sorted([n for n, d in in_degree.items() if d == 0])
         groups: list[list[str]] = []
+        visited: set[str] = set()
 
         while ready:
             groups.append(ready)
             next_ready: list[str] = []
             for node in ready:
+                visited.add(node)
                 for dep in dependents[node]:
                     in_degree[dep] -= 1
                     if in_degree[dep] == 0:
                         next_ready.append(dep)
             ready = sorted(next_ready)
 
+        # Jobs left with in_degree > 0 are in (or blocked by) a cycle. Sorting
+        # them silently would drop them from the run, so report the cycle.
+        if len(visited) != len(jobs):
+            stuck = sorted(set(jobs) - visited)
+            cycle = self._find_cycle(stuck) or stuck
+            raise ValueError(f"Circular dependency detected: {' → '.join(cycle)}")
+
         return groups
+
+    def _find_cycle(self, nodes: list[str]) -> list[str]:
+        """DFS em `needs` devolve o primeiro ciclo, ou [] se não houver."""
+        path: list[str] = []
+        on_path: set[str] = set()
+        seen: set[str] = set()
+        jobs = self.workflow.jobs
+
+        def walk(name: str) -> list[str]:
+            seen.add(name)
+            path.append(name)
+            on_path.add(name)
+            for need in sorted(jobs[name].needs):
+                if need not in jobs or need in seen and need not in on_path:
+                    continue
+                if need in on_path:
+                    return [*path[path.index(need) :], need]
+                found = walk(need)
+                if found:
+                    return found
+            path.pop()
+            on_path.discard(name)
+            return []
+
+        for name in nodes:
+            if name not in seen:
+                found = walk(name)
+                if found:
+                    return found
+        return []
 
     def _evaluate_job(self, job: Job) -> str:
         for need in job.needs:
@@ -105,11 +145,17 @@ class CISimulator:
         if expr == "always()":
             return True
         if expr == "failure()":
-            return False
+            return any(job.status == "failure" for job in self.workflow.jobs.values())
         if expr == "cancelled()":
-            return False
+            return False  # simulação não tem fonte de cancelamento
         if expr == "success()":
-            return True
+            # Jobs ainda não avaliados ("pending") não contam: success() é
+            # verdadeiro enquanto nada já executado falhou ou foi pulado.
+            return all(
+                job.status == "success"
+                for job in self.workflow.jobs.values()
+                if job.status != "pending"
+            )
 
         m = re.match(r"contains\((.+),\s*(.+)\)", expr)
         if m:
